@@ -4,7 +4,7 @@
 #define MIN_AMOUNT				100.0f
 #define FLOAT_CROUCH			49.9f
 #define MAX_CLIENTS				32
-#define MAX_ENTITIES			4096
+#define MAX_ENTITIES			2265
 #define GET_DISTANCE(a, b)		((a - b).Length2D())
 #define GET_COLLIDE(a, b)		(abs(a.z - b.z) < 96 && (a - b).Length2D() < 96)
 
