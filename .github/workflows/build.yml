@@ -114,19 +114,6 @@ jobs:
          rcedit ${{ github.workspace }}\publish\addons\resemiclip\resemiclip_mm.dll --set-version-string ProductName "ReSemiclip - resemiclip_mm.dll" --set-file-version "${{ steps.get_version.outputs.version }}" --set-product-version "${{ steps.get_version.outputs.version }}" --set-version-string FileDescription "ReSemiclip - This module allows to pass through players, Commit: $env:GITHUB_SHA" --set-version-string "Comments" "Commit: $env:GITHUB_SHA" --set-version-string CompanyName "ReHLDS Dev Team" --set-version-string LegalCopyright "Copyright 2025 Valve, ReHLDS DevTeam" --set-icon msvc/icon.ico
         shell: "pwsh"
 
-      - name: Import PFX and sign
-        if: github.event_name != 'pull_request'
-        env:
-          KEY_PFX_PASS: ${{ secrets.KEY_PFX_PASS }}
-        # https://github.com/actions/runner-images/blob/main/images/windows/Windows2025-Readme.md
-        run: |
-               $pfxBase64 = "${{ secrets.KEY_PFX_B64 }}"
-               [IO.File]::WriteAllBytes("${{ github.workspace }}\signing-cert.pfx", [Convert]::FromBase64String($pfxBase64))
-               certutil -f -p "${{ secrets.KEY_PFX_PASS }}" -importPFX "${{ github.workspace }}\signing-cert.pfx"
-               & 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x86\signtool.exe' sign /a /f "${{ github.workspace }}\signing-cert.pfx"  /p $env:KEY_PFX_PASS /d "ReSemiclip - resemiclip_mm.dll" /du "https://rehlds.dev/" /tr "http://timestamp.digicert.com" /td sha256 /fd sha256 /v ${{ github.workspace }}\publish\addons\resemiclip\resemiclip_mm.dll
-               Remove-Item -Recurse -Force "${{ github.workspace }}\signing-cert.pfx"
-        shell: "pwsh"
-
       - name: Deploy artifacts
         uses: actions/upload-artifact@v4
         with:
