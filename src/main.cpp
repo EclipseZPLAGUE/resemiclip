@@ -1,10 +1,11 @@
 #include "precompiled.h"
 
 cvar_t cv_resemiclip_version = { "resemiclip_version", Plugin_info.version, FCVAR_SERVER | FCVAR_EXTDLL, 0, nullptr };
-CGamePlayer g_Players[MAX_CLIENTS];
+CGamePlayer g_Players[MAX_ENTITIES];
 CConfig g_Config;
 CGameData g_GameData;
 CBaseEntity *g_pVirtualGrenade;
+CBaseEntity *g_pVirtualTarget;
 bool bInitialized = false;
 bool bActivated = false;
 
@@ -14,7 +15,8 @@ struct {
 }
 
 g_RegVirtualTable[] = {
-	{ "grenade", g_pVirtualGrenade }
+	{ "grenade", g_pVirtualGrenade },
+	{ "info_target", g_pVirtualTarget }
 };
 
 int OnMetaAttach()
@@ -71,7 +73,7 @@ void CGameData::Init()
 
 inline void ClearAllClients()
 {
-	for (int i = 0; i < g_GameData.GetMaxClients(); i++)
+	for (int i = 0; i < g_GameData.GetMaxEntities(); i++)
 	{
 		CGamePlayer *pPlayer = PLAYER_FOR_NUM(i);
 
@@ -87,11 +89,15 @@ void ServerActivate_Post(edict_t *pEdictList, int edictCount, int clientMax)
 {
 	bActivated = true;
 
+	int entityMax = gpGlobals->maxEntities;
+
 	g_GameData.SetMaxClients(clientMax);
+	g_GameData.SetMaxEntities(entityMax);
 	g_GameData.SetMaxClientEdict(pEdictList + clientMax);
+	g_GameData.SetMaxEntityEdict(pEdictList + entityMax);
 	g_GameData.SetStartEnt(pEdictList + 1);
 
-	for (int i = 0; i < clientMax; i++)
+	for (int i = 0; i < entityMax; i++)
 	{
 		CGamePlayer *pPlayer = PLAYER_FOR_NUM(i);
 
@@ -158,7 +164,7 @@ void CGamePlayer::Player_Clear()
 {
 	m_bDont = false;
 
-	for (int i = 0; i <= g_GameData.GetMaxClients(); i++)
+	for (int i = 0; i <= g_GameData.GetMaxEntities(); i++)
 	{
 		m_fDiff[i] = 0.0f;
 		m_bCrouch[i] = false;
@@ -215,6 +221,8 @@ state_update:
 
 				if (g_Config.GetTransparency())
 				{
+					state->renderfx = kRenderFxNone;
+					state->rendercolor.b = state->rendercolor.g = state->rendercolor.r = 255.0f;
 					state->rendermode = kRenderTransAlpha;
 					state->renderamt = g_Config.GetEffects() ? (pPlayer->GetDiff(pObject->GetIndex()) > MIN_AMOUNT) ? pPlayer->GetDiff(pObject->GetIndex()) : MIN_AMOUNT : g_Config.GetTransparency();
 				}
@@ -222,14 +230,42 @@ state_update:
 		}
 		else
 		{
-			if (pl && pl->m_iTeam == TERRORIST)
-			{
-				CGrenade *pGrenade = (CGrenade *)GET_PRIVATE(pEnt);
+			if (pEnt == pHost) {
+				continue;
+			}
 
-				if (*(CGrenade **)pGrenade == g_pVirtualGrenade && pGrenade->m_bIsC4)
+			CBaseEntity *pEntity = (CBaseEntity *)GET_PRIVATE(pEnt);
+
+			if (pl && pEntity)
+			{
+				CGrenade *pGrenade = (CGrenade *)pEntity;
+
+				if (*(CGrenade **)pGrenade == g_pVirtualGrenade && pGrenade->m_bIsC4 && pl->m_iTeam == TERRORIST)
 				{
 					state->solid = SOLID_NOT;
 					continue;
+				}
+
+				CPointEntity *pTarget = (CPointEntity *)pEntity;
+
+				if (*(CPointEntity **)pTarget == g_pVirtualTarget && (pTarget->pev->flags & FL_MONSTER))
+				{
+					pObject = PLAYER_FOR_EDICT(pEnt);
+
+					if (pPlayer->GetSolid(pObject->GetIndex()))
+					{
+						state->solid = SOLID_NOT;
+
+						if (g_Config.GetTransparency())
+						{
+							state->renderfx = kRenderFxNone;
+							state->rendercolor.b = state->rendercolor.g = state->rendercolor.r = 255.0f;
+							state->rendermode = kRenderTransAlpha;
+							state->renderamt = g_Config.GetEffects() ? (pPlayer->GetDiff(pObject->GetIndex()) > MIN_AMOUNT) ? pPlayer->GetDiff(pObject->GetIndex()) : MIN_AMOUNT : g_Config.GetTransparency();
+						}
+
+						continue;
+					}
 				}
 			}
 
@@ -261,18 +297,42 @@ void CBasePlayer_Spawn(IReGameHook_CBasePlayer_Spawn *chain, CBasePlayer *pthis)
 	chain->callNext(pthis);
 }
 
-inline bool IsTeamAllowed(CBasePlayer *HostPlayer, CBasePlayer *EntPlayer)
+inline int EntityRelationship(CBasePlayer *pPlayer, CBaseEntity *pTarget)
+{
+	if (pPlayer == pTarget)
+		return GR_TEAMMATE;
+
+	if (!pPlayer || !pTarget)
+	{
+		return GR_NOTTEAMMATE;
+	}
+
+	if (pTarget->IsPlayer())
+	{
+		return (CSGameRules()->PlayerRelationship(pPlayer, pTarget));
+	}
+
+	if (pPlayer->m_iTeam != pTarget->pev->iuser4)
+	{
+		return GR_NOTTEAMMATE;
+	}
+
+	return GR_TEAMMATE;
+}
+
+inline bool IsTeamAllowed(CBasePlayer *HostPlayer, CBaseEntity *EntPlayer)
 {
 	auto hostTeam = HostPlayer->m_iTeam;
+	int entTeam = !EntPlayer->IsPlayer() ? EntPlayer->pev->iuser4 : ((CBasePlayer *)EntPlayer)->m_iTeam;
 
 	if (hostTeam == SPECTATOR || g_Config.GetTeam() == SC_TEAM_ALL)
 		return true;
 
 	if (g_Config.GetTeam() == SC_TEAM_TEAMMATE)
-		return (CSGameRules()->PlayerRelationship(HostPlayer, EntPlayer) == GR_TEAMMATE);
+		return (EntityRelationship(HostPlayer, EntPlayer) == GR_TEAMMATE);
 
 	// SC_TEAM_T, SC_TEAM_CT
-	return (hostTeam == g_Config.GetTeam() && EntPlayer->m_iTeam == g_Config.GetTeam());
+	return (hostTeam == g_Config.GetTeam() && entTeam == g_Config.GetTeam());
 }
 
 inline bool allowDontSolid(playermove_t *pm, edict_t *pHost, int host, int j)
@@ -286,10 +346,21 @@ inline bool allowDontSolid(playermove_t *pm, edict_t *pHost, int host, int j)
 	}
 
 	int ent = pm->physents[j].player;
-	edict_t *pEntity = EDICT(ent);
-	CBasePlayer *EntPlayer = (CBasePlayer *)CBaseEntity::Instance(pEntity);
+	bool isEntity = !ent;
 
-	if (!EntPlayer || !EntPlayer->IsPlayer()) {
+	if (isEntity)
+		ent = pm->physents[j].info;
+
+	edict_t *pEntity = EDICT(ent);
+	CBaseEntity *EntPlayer = CBaseEntity::Instance(pEntity);
+
+	if (!EntPlayer || (!EntPlayer->IsPlayer() && !isEntity)) {
+		return false;
+	}
+
+	CPointEntity *pTarget = (CPointEntity *)EntPlayer;
+
+	if ((*(CPointEntity **)pTarget != g_pVirtualTarget || !(pTarget->pev->flags & FL_MONSTER)) && isEntity) {
 		return false;
 	}
 
@@ -300,8 +371,6 @@ inline bool allowDontSolid(playermove_t *pm, edict_t *pHost, int host, int j)
 	Vector hostOrigin = pevHost->origin;
 	Vector entOrigin = pevEnt->origin;
 	int IndexObject = pObject->GetIndex();
-	int hostTeamId = HostPlayer->m_iTeam;
-	int entTeamId = EntPlayer->m_iTeam;
 
 	*pPlayer->GetDiff(pObject) = GET_DISTANCE(hostOrigin, entOrigin);
 	*pPlayer->GetSolid(pObject) =
@@ -311,6 +380,15 @@ inline bool allowDontSolid(playermove_t *pm, edict_t *pHost, int host, int j)
 
 	if (g_Config.GetCrouch() && pPlayer->GetSolid(IndexObject))
 	{
+		if (isEntity)
+		{
+			if ((pevEnt->flags & FL_DUCKING) && (pevHost->groundentity == pEntity || pevHost->absmin.z > pevEnt->absmax.z)) {
+				return *pPlayer->GetSolid(pObject) = false;
+			}
+
+			return pPlayer->GetSolid(IndexObject);
+		}
+
 		int IndexPlayer = pPlayer->GetIndex();
 		float fDiff = abs(hostOrigin.z - entOrigin.z);
 
@@ -333,10 +411,10 @@ inline bool allowDontSolid(playermove_t *pm, edict_t *pHost, int host, int j)
 			return *pPlayer->GetSolid(pObject) = false;
 		}
 		else if ((pPlayer->GetCrouch(IndexObject)
-				|| pObject->GetCrouch(IndexPlayer))
-				&& (pevHost->groundentity == pEntity
-				|| pevEnt->groundentity == pHost
-				|| fDiff >= FLOAT_CROUCH))
+			&& pObject->GetCrouch(IndexPlayer))
+			&& (pevHost->groundentity == pEntity
+			&& pevEnt->groundentity == pHost)
+			|| fDiff >= FLOAT_CROUCH)
 		{
 			return *pPlayer->GetSolid(pObject) = false;
 		}
@@ -357,29 +435,11 @@ void PM_Move(playermove_t *pm, int server)
 	edict_t *pHost = EDICT(host);
 	CBasePlayer *pCBasePlayer = (CBasePlayer *)CBaseEntity::Instance(pHost);
 
-	if (pCBasePlayer && pCBasePlayer->IsPlayer() && pCBasePlayer->m_iTeam == TERRORIST)
-	{
-		// to changes mins / maxs c4 from physents
-		for (int i = 0; i < pm->numphysent; ++i)
-		{
-			CBaseEntity *pEntity = (CBaseEntity *)GET_PRIVATE(EDICT(pm->physents[i].info));
-			CGrenade *pGrenade = (CGrenade *)pEntity;
-
-			if (*(CGrenade **)pGrenade != g_pVirtualGrenade || !pGrenade->m_bIsC4) {
-				continue;
-			}
-
-			pm->physents[i].maxs = {};
-			pm->physents[i].mins = {};
-
-			// it found
-			break;
-		}
-	}
+	bool isTerrorist = (pCBasePlayer && pCBasePlayer->IsPlayer() && pCBasePlayer->m_iTeam == TERRORIST);
 
 	for (j = 0; j < pm->numphysent; ++j)
 	{
-		if (pm->physents[++numphysent].player && ++numphyspl) {
+		if (++numphysent && (pm->physents[numphysent].info || pm->physents[numphysent].player) && ++numphyspl) {
 			break;
 		}
 	}
@@ -396,7 +456,18 @@ void PM_Move(playermove_t *pm, int server)
 
 	for (j = numphysent; j < pm->numphysent; ++j)
 	{
-		if (!pm->physents[j].player || !allowDontSolid(pm, pHost, host, j))
+		CBaseEntity *pEntity = (CBaseEntity *)GET_PRIVATE(EDICT(pm->physents[j].info));
+
+		if (pEntity)
+		{
+			CGrenade *pGrenade = (CGrenade *)pEntity;
+
+			if (*(CGrenade **)pGrenade == g_pVirtualGrenade && pGrenade->m_bIsC4 && isTerrorist) {
+				continue;
+			}
+		}
+
+		if (!allowDontSolid(pm, pHost, host, j))
 		{
 			pm->physents[numphysent++] = pm->physents[j];
 		}
@@ -414,10 +485,11 @@ void PM_Move(playermove_t *pm, int server)
 		bool needSolid = false;
 		int hostTeamId = pCBasePlayer->m_iTeam;
 		Vector hostOrigin = pHost->v.origin;
+		Vector hostAbsMin = pHost->v.absmin;
 		CGamePlayer *pPlayer = PLAYER_FOR_NUM(host - 1);
 		edict_t *pEntity;
 
-		for (pEntity = g_GameData.GetStartEnt(), j = 1; pEntity <= g_GameData.GetMaxClientEdict(); pEntity++, j++)
+		for (pEntity = g_GameData.GetStartEnt(), j = 1; pEntity <= g_GameData.GetMaxEntityEdict(); pEntity++, j++)
 		{
 			if (!pEntity->pvPrivateData) {
 				continue;
@@ -431,19 +503,22 @@ void PM_Move(playermove_t *pm, int server)
 
 			entvars_t *e = &(pEntity->v);
 
-			if (e->deadflag != DEAD_NO || e->health <= 0.0) {
+			if ((e->deadflag != DEAD_NO && (e->flags & FL_CLIENT)) || e->health <= 0.0) {
 				continue;
 			}
 
 			if (!bCollide && j != host && GET_COLLIDE(hostOrigin, e->origin))
 			{
-				CBasePlayer *EntPlayer = (CBasePlayer *)CBaseEntity::Instance(pEntity);
+				CBaseEntity *EntPlayer = CBaseEntity::Instance(pEntity);
 
-				if (!EntPlayer || !EntPlayer->IsPlayer()) {
+				if (!EntPlayer) {
 					continue;
 				}
 
-				if (IsTeamAllowed(pCBasePlayer, EntPlayer))
+				CPointEntity *pTarget = (CPointEntity *)EntPlayer;
+
+				if (((*(CPointEntity **)pTarget == g_pVirtualTarget
+				&& (pTarget->pev->flags & FL_MONSTER)) || EntPlayer->IsPlayer()) && IsTeamAllowed(pCBasePlayer, EntPlayer))
 				{
 					bCollide = true;
 				}
@@ -726,6 +801,35 @@ int ShouldCollide(edict_t *pentTouched, edict_t *pentOther)
 				}
 
 				CGamePlayer *pGamePlayer = PLAYER_FOR_EDICT(pGrenadeOther->pev->owner);
+
+				if (pGamePlayer && pGamePlayer->GetSolid(EDICT_NUM(pentTouched))) {
+					RETURN_META_VALUE(MRES_SUPERCEDE, 0);
+				}
+			}
+		}
+	}
+
+	if (pTouched && pOther && pOther->IsPlayer())
+	{
+		// ignore owner's
+		if (pentOther->v.owner == pentTouched || pentTouched->v.owner == pentOther) {
+			RETURN_META_VALUE(MRES_IGNORED, 0);
+		}
+
+		if (!((pOther->pev->flags | pTouched->pev->flags) & FL_KILLME))
+		{
+			// if collided entity
+			CPointEntity *pTarget = (CPointEntity *)pTouched;
+
+			if (*(CPointEntity **)pTarget == g_pVirtualTarget && (pTarget->pev->flags & FL_MONSTER) && pTarget->pev->euser4)
+			{
+				CBaseEntity *pOwner = (CBaseEntity *)GET_PRIVATE(pTarget->pev->euser4);
+
+				if (pOwner && pOwner->IsPlayer() && pOwner == pOther && (pOwner->pev->button & IN_USE)) {
+					RETURN_META_VALUE(MRES_IGNORED, 0);
+				}
+
+				CGamePlayer *pGamePlayer = PLAYER_FOR_EDICT(pentOther);
 
 				if (pGamePlayer && pGamePlayer->GetSolid(EDICT_NUM(pentTouched))) {
 					RETURN_META_VALUE(MRES_SUPERCEDE, 0);
