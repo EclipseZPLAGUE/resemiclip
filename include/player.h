@@ -24,13 +24,13 @@ private:
 
 	int m_iIndex;
 	bool m_bDont;
-	bool m_bSolid[MAX_CLIENTS + 1];
-	bool m_bCrouch[MAX_CLIENTS + 1];
-	float m_fDiff[MAX_CLIENTS + 1];
+	bool m_bSolid[MAX_ENTITIES + 1];
+	bool m_bCrouch[MAX_ENTITIES + 1];
+	float m_fDiff[MAX_ENTITIES + 1];
 
 };
 
-extern CGamePlayer g_Players[MAX_CLIENTS];
+extern CGamePlayer g_Players[MAX_ENTITIES];
 
 inline edict_t *EDICT(int index)
 {
