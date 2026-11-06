@@ -748,7 +748,7 @@ int ShouldCollide(edict_t *pentTouched, edict_t *pentOther)
 			// if collided info_target
 			CPointEntity *pTargetTouched = (CPointEntity *)pTouched;
 
-			if (*(CPointEntity **)pTargetTouched == g_pVirtualTarget && pTargetTouched->pev->flags & FL_MONSTER && pTargetTouched->pev->euser4)
+			if (*(CPointEntity **)pTargetTouched == g_pVirtualTarget && pTargetTouched->pev->euser4)
 			{
 				CGamePlayer *pGamePlayer = PLAYER_FOR_EDICT(pTargetTouched->pev->euser4);
 
