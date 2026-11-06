@@ -818,7 +818,7 @@ int ShouldCollide(edict_t *pentTouched, edict_t *pentOther)
 
 		if (!((pOther->pev->flags | pTouched->pev->flags) & FL_KILLME))
 		{
-			// if collided entity
+			// if collided info_target
 			CPointEntity *pTargetTouched = (CPointEntity *)pTouched;
 
 			if (*(CPointEntity **)pTargetTouched == g_pVirtualTarget && (pTargetTouched->pev->flags & FL_MONSTER) && pTargetTouched->pev->euser4)
