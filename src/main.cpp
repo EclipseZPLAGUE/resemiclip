@@ -5,6 +5,7 @@ CGamePlayer g_Players[MAX_CLIENTS];
 CConfig g_Config;
 CGameData g_GameData;
 CBaseEntity *g_pVirtualGrenade;
+CBaseEntity *g_pVirtualTarget;
 bool bInitialized = false;
 bool bActivated = false;
 
@@ -14,7 +15,8 @@ struct {
 }
 
 g_RegVirtualTable[] = {
-	{ "grenade", g_pVirtualGrenade }
+	{ "grenade", g_pVirtualGrenade },
+	{ "info_target", g_pVirtualTarget }
 };
 
 int OnMetaAttach()
@@ -728,6 +730,29 @@ int ShouldCollide(edict_t *pentTouched, edict_t *pentOther)
 				CGamePlayer *pGamePlayer = PLAYER_FOR_EDICT(pGrenadeOther->pev->owner);
 
 				if (pGamePlayer && pGamePlayer->GetSolid(EDICT_NUM(pentTouched))) {
+					RETURN_META_VALUE(MRES_SUPERCEDE, 0);
+				}
+			}
+		}
+	}
+
+	if (pTouched && pOther && pOther->IsPlayer())
+	{
+		// ignore other's
+		if (!(gpGlobals->trace_flags & ((1<<16)|(1<<18)))) {
+			RETURN_META_VALUE(MRES_IGNORED, 0);
+		}
+
+		if (!((pOther->pev->flags | pTouched->pev->flags) & FL_KILLME))
+		{
+			// if collided info_target
+			CPointEntity *pTargetTouched = (CPointEntity *)pTouched;
+
+			if (*(CPointEntity **)pTargetTouched == g_pVirtualTarget && pTargetTouched->pev->euser4)
+			{
+				CGamePlayer *pGamePlayer = PLAYER_FOR_EDICT(pTargetTouched->pev->euser4);
+
+				if (pGamePlayer && pGamePlayer->GetSolid(EDICT_NUM(pentOther))) {
 					RETURN_META_VALUE(MRES_SUPERCEDE, 0);
 				}
 			}
